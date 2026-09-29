@@ -189,4 +189,360 @@ def technical_signals(d):
 
     macd = latest_value(d, "MACD")
     macds = latest_value(d, "MACD_Signal")
-    out…
+    out.append(("MACD", macd, "Bullish" if macd > macds else "Bearish"))
+
+    stoch = latest_value(d, "Stoch_K")
+    out.append(("Stochastic", stoch, "Bullish" if stoch < 20 else "Bearish" if stoch > 80 else "Neutral"))
+
+    wr = latest_value(d, "Williams_R")
+    out.append(("Williams %R", wr, "Bullish" if wr < -80 else "Bearish" if wr > -20 else "Neutral"))
+
+    cci = latest_value(d, "CCI")
+    out.append(("CCI", cci, "Bullish" if cci > 100 else "Bearish" if cci < -100 else "Neutral"))
+
+    adx = latest_value(d, "ADX")
+    dip = latest_value(d, "DI_Plus")
+    dim = latest_value(d, "DI_Minus")
+    adx_sig = "Bullish" if dip > dim and adx >= 20 else "Bearish" if dim > dip and adx >= 20 else "Neutral"
+    out.append(("ADX / DI", adx, adx_sig))
+
+    bb_u = latest_value(d, "BB_Upper")
+    bb_l = latest_value(d, "BB_Lower")
+    bb_sig = "Bullish" if c < bb_l else "Bearish" if c > bb_u else "Neutral"
+    out.append(("Bollinger Bands", c, bb_sig))
+
+    mfi = latest_value(d, "MFI")
+    out.append(("MFI", mfi, "Bullish" if mfi < 20 else "Bearish" if mfi > 80 else "Neutral"))
+
+    vwap = latest_value(d, "VWAP")
+    out.append(("VWAP", vwap, "Bullish" if c > vwap else "Bearish"))
+
+    obv = latest_value(d, "OBV")
+    obv_ma = latest_value(d, "OBV_SMA20")
+    out.append(("OBV", obv, "Bullish" if obv > obv_ma else "Bearish"))
+
+    roc = latest_value(d, "ROC_12")
+    out.append(("ROC", roc, "Bullish" if roc > 0 else "Bearish"))
+
+    mom = latest_value(d, "Momentum_10")
+    out.append(("Momentum", mom, "Bullish" if mom > 0 else "Bearish"))
+
+    return out
+
+# -------------------- Sidebar --------------------
+
+st.sidebar.header("🔍 Stock Analyzer")
+ticker_symbol = st.sidebar.text_input(
+    "US Ticker",
+    "AAPL",
+    help="Examples: AAPL, NVDA, MSFT, TSLA, AMZN"
+).strip().upper()
+
+period = st.sidebar.selectbox(
+    "Historical period",
+    ["6mo", "1y", "2y", "5y"],
+    index=1
+)
+
+if st.sidebar.button("🚀 ANALYZE STOCK", use_container_width=True):
+    st.session_state["run_analysis"] = True
+
+if st.session_state.get("run_analysis", False):
+    with st.spinner(f"{ticker_symbol} का market data analyze हो रहा है..."):
+        try:
+            stock = yf.Ticker(ticker_symbol)
+            df = stock.history(period=period, auto_adjust=False)
+            info = stock.info
+
+            if df.empty:
+                st.error("डेटा नहीं मिला। सही US ticker डालें।")
+                st.stop()
+
+            df = add_indicators(df)
+            current_price = latest_value(df, "Close")
+            signals = technical_signals(df)
+
+            bullish = sum(1 for x in signals if x[2] == "Bullish")
+            bearish = sum(1 for x in signals if x[2] == "Bearish")
+            neutral = sum(1 for x in signals if x[2] == "Neutral")
+
+            st.metric(
+                f"💰 {ticker_symbol} Current Price",
+                f"${current_price:,.2f}"
+            )
+
+            tab1, tab2, tab3, tab4, tab5 = st.tabs([
+                "📈 Price & Indicators",
+                "⚙️ Technical",
+                "🏢 Fundamentals",
+                "📰 News",
+                "🌎 Global & Investors"
+            ])
+
+            # -------------------- Chart --------------------
+            with tab1:
+                fig = go.Figure()
+                fig.add_trace(go.Candlestick(
+                    x=df.index,
+                    open=df["Open"],
+                    high=df["High"],
+                    low=df["Low"],
+                    close=df["Close"],
+                    name="Price"
+                ))
+                for col in ["SMA_20", "SMA_50", "EMA_21", "EMA_200"]:
+                    fig.add_trace(go.Scatter(
+                        x=df.index, y=df[col], mode="lines", name=col
+                    ))
+                fig.add_trace(go.Scatter(
+                    x=df.index, y=df["BB_Upper"], mode="lines",
+                    name="BB Upper", line=dict(dash="dot")
+                ))
+                fig.add_trace(go.Scatter(
+                    x=df.index, y=df["BB_Lower"], mode="lines",
+                    name="BB Lower", line=dict(dash="dot")
+                ))
+                fig.update_layout(
+                    title=f"{ticker_symbol} Price + Moving Averages + Bollinger Bands",
+                    height=650,
+                    xaxis_rangeslider_visible=False
+                )
+                st.plotly_chart(fig, use_container_width=True)
+
+                c1, c2, c3 = st.columns(3)
+                c1.metric("Bullish signals", bullish)
+                c2.metric("Bearish signals", bearish)
+                c3.metric("Neutral signals", neutral)
+
+                st.caption("Signals are indicator readings, not guaranteed future outcomes.")
+
+            # -------------------- Technical --------------------
+            with tab2:
+                st.subheader("📊 Technical Indicator Dashboard")
+
+                rows = []
+                for name, value, sig in signals:
+                    rows.append({
+                        "Indicator": name,
+                        "Latest Value": (
+                            round(value, 2) if pd.notna(value) else "N/A"
+                        ),
+                        "Signal": sig
+                    })
+
+                tech_df = pd.DataFrame(rows)
+                st.dataframe(tech_df, use_container_width=True, hide_index=True)
+
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.subheader("Momentum")
+                    st.write(f"RSI: **{latest_value(df, 'RSI'):.2f}**")
+                    st.write(f"MACD: **{latest_value(df, 'MACD'):.4f}**")
+                    st.write(f"Stochastic %K: **{latest_value(df, 'Stoch_K'):.2f}**")
+                    st.write(f"CCI: **{latest_value(df, 'CCI'):.2f}**")
+                    st.write(f"ADX: **{latest_value(df, 'ADX'):.2f}**")
+
+                with col2:
+                    st.subheader("Price Levels")
+                    st.write(f"VWAP: **${latest_value(df, 'VWAP'):.2f}**")
+                    st.write(f"Support (20): **${latest_value(df, 'Support_20'):.2f}**")
+                    st.write(f"Resistance (20): **${latest_value(df, 'Resistance_20'):.2f}**")
+                    st.write(f"Pivot: **${latest_value(df, 'Pivot'):.2f}**")
+                    st.write(f"ATR: **${latest_value(df, 'ATR'):.2f}**")
+
+                st.subheader("📌 MACD")
+                macd_fig = go.Figure()
+                macd_fig.add_trace(go.Scatter(
+                    x=df.index, y=df["MACD"], name="MACD", mode="lines"
+                ))
+                macd_fig.add_trace(go.Scatter(
+                    x=df.index, y=df["MACD_Signal"], name="Signal", mode="lines"
+                ))
+                macd_fig.add_bar(
+                    x=df.index, y=df["MACD_Hist"], name="Histogram"
+                )
+                macd_fig.update_layout(height=400)
+                st.plotly_chart(macd_fig, use_container_width=True)
+
+            # -------------------- Fundamentals --------------------
+            with tab3:
+                st.subheader("🏢 Company Fundamentals")
+
+                fundamental_fields = {
+                    "Company": "longName",
+                    "Sector": "sector",
+                    "Industry": "industry",
+                    "Market Cap": "marketCap",
+                    "P/E (TTM)": "trailingPE",
+                    "Forward P/E": "forwardPE",
+                    "EPS": "trailingEps",
+                    "Price/Book": "priceToBook",
+                    "ROE": "returnOnEquity",
+                    "ROA": "returnOnAssets",
+                    "Debt/Equity": "debtToEquity",
+                    "Profit Margin": "profitMargins",
+                    "Operating Margin": "operatingMargins",
+                    "Revenue Growth": "revenueGrowth",
+                    "Earnings Growth": "earningsGrowth",
+                    "Free Cash Flow": "freeCashflow",
+                    "Dividend Yield": "dividendYield"
+                }
+
+                f_rows = []
+                for label, key in fundamental_fields.items():
+                    value = info.get(key, "N/A")
+                    if key in ["marketCap", "freeCashflow"] and isinstance(value, (int, float)):
+                        value = f"${value:,.0f}"
+                    elif key in ["returnOnEquity", "returnOnAssets", "profitMargins",
+                                  "operatingMargins", "revenueGrowth", "earningsGrowth",
+                                  "dividendYield"] and isinstance(value, (int, float)):
+                        value = f"{value * 100:.2f}%"
+                    f_rows.append({"Metric": label, "Value": value})
+
+                st.dataframe(
+                    pd.DataFrame(f_rows),
+                    use_container_width=True,
+                    hide_index=True
+                )
+
+            # -------------------- News --------------------
+            with tab4:
+                st.subheader("📰 Latest Available Company News")
+
+                try:
+                    news = stock.news
+                except Exception:
+                    news = []
+
+                if news:
+                    for item in news[:15]:
+                        content = item.get("content", item)
+                        title = content.get("title", item.get("title", "News"))
+                        publisher = content.get("provider", {}).get(
+                            "displayName",
+                            item.get("publisher", "Unknown")
+                        )
+                        link = (
+                            content.get("canonicalUrl", {}).get("url")
+                            or content.get("clickThroughUrl", {}).get("url")
+                            or item.get("link")
+                        )
+                        pub_time = content.get("pubDate", "")
+
+                        st.markdown(f"### {title}")
+                        st.caption(f"{publisher} • {pub_time}")
+                        if link:
+                            st.markdown(f"[Open source article]({link})")
+                        st.divider()
+                else:
+                    st.info("इस ticker के लिए उपलब्ध news data नहीं मिला।")
+
+                st.caption(
+                    "News availability depends on the data provider. "
+                    "The analyzer does not treat a headline alone as proof of future price direction."
+                )
+
+            # -------------------- Global + Investors --------------------
+            with tab5:
+                st.subheader("🌎 Global Market Snapshot")
+
+                global_tickers = {
+                    "S&P 500": "^GSPC",
+                    "Nasdaq": "^IXIC",
+                    "Dow Jones": "^DJI",
+                    "VIX": "^VIX",
+                    "US 10Y Yield": "^TNX",
+                    "Gold": "GC=F",
+                    "Crude Oil": "CL=F",
+                    "USD Index": "DX-Y.NYB",
+                    "Bitcoin": "BTC-USD"
+                }
+
+                global_rows = []
+                for name, symbol in global_tickers.items():
+                    try:
+                        g = yf.Ticker(symbol).history(period="5d")
+                        if not g.empty:
+                            last = float(g["Close"].iloc[-1])
+                            prev = float(g["Close"].iloc[-2]) if len(g) > 1 else np.nan
+                            change = ((last / prev) - 1) * 100 if pd.notna(prev) and prev else np.nan
+                            global_rows.append({
+                                "Market": name,
+                                "Value": round(last, 4),
+                                "1D Change %": round(change, 2) if pd.notna(change) else "N/A"
+                            })
+                    except Exception:
+                        pass
+
+                if global_rows:
+                    st.dataframe(
+                        pd.DataFrame(global_rows),
+                        use_container_width=True,
+                        hide_index=True
+                    )
+                else:
+                    st.info("Global market data temporarily unavailable.")
+
+                st.subheader("🏦 Institutional / Insider Data")
+
+                try:
+                    major = stock.major_holders
+                    if major is not None and not major.empty:
+                        st.write("Major holders")
+                        st.dataframe(major, use_container_width=True, hide_index=True)
+                except Exception:
+                    st.info("Major holder data unavailable.")
+
+                try:
+                    inst = stock.institutional_holders
+                    if inst is not None and not inst.empty:
+                        st.write("Institutional holders")
+                        st.dataframe(inst, use_container_width=True, hide_index=True)
+                except Exception:
+                    st.info("Institutional holder data unavailable.")
+
+                try:
+                    insider = stock.insider_transactions
+                    if insider is not None and not insider.empty:
+                        st.write("Recent insider transactions")
+                        st.dataframe(insider.head(25), use_container_width=True, hide_index=True)
+                except Exception:
+                    st.info("Insider transaction data unavailable.")
+
+            # -------------------- Summary --------------------
+            st.markdown("---")
+            st.subheader("🧭 Transparent Analysis Summary")
+
+            if bullish > bearish:
+                technical_summary = "Technical indicators currently have more Bullish readings than Bearish readings."
+            elif bearish > bullish:
+                technical_summary = "Technical indicators currently have more Bearish readings than Bullish readings."
+            else:
+                technical_summary = "Technical indicators are currently mixed."
+
+            st.info(technical_summary)
+            st.write(
+                "यह summary उपलब्ध market data पर आधारित है। "
+                "यह guaranteed return, price prediction या व्यक्तिगत investment advice नहीं है।"
+            )
+
+        except Exception as e:
+            st.error(f"Analysis error: {e}")
+            st.info("यदि error बना रहे तो ticker और error message भेजें।")
+else:
+    st.info("👈 Sidebar में ticker डालें और **ANALYZE STOCK** दबाएँ।")
+    st.markdown("""
+    ### अभी इस version में
+    - Moving averages
+    - RSI / MACD
+    - Bollinger Bands
+    - ATR / ADX
+    - Stochastic / Williams %R
+    - CCI / ROC / Momentum
+    - OBV / MFI / VWAP
+    - Support / Resistance / Pivot
+    - Fundamentals
+    - Available company news
+    - Global market snapshot
+    - Institutional / insider data
+    """)
